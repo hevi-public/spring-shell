@@ -137,7 +137,7 @@ public class ShellTest {
 		when(parameterResolver.resolve(any(), any())).thenReturn(valueResult);
 		doThrow(new Exit()).when(resultHandler).handleResult(any());
 
-		shell.methodTargets = Collections.singletonMap("hello world", MethodTarget.of("helloWorld", this, new Command.Help("Say hello")));
+		shell.methodTargets = Collections.singletonMap("", MethodTarget.of("helloWorld", this, new Command.Help("Say hello")));
 
 		try {
 			shell.run(inputProvider);

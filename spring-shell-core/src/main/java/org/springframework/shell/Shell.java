@@ -20,12 +20,7 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.nio.channels.ClosedByInterruptException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import javax.annotation.PostConstruct;
@@ -33,7 +28,6 @@ import javax.validation.ConstraintViolation;
 import javax.validation.Validation;
 import javax.validation.Validator;
 import javax.validation.ValidatorFactory;
-import javax.validation.executable.ExecutableValidator;
 
 import org.jline.utils.Signals;
 
@@ -164,7 +158,7 @@ public class Shell implements CommandRegistry {
 		String command = findLongestCommand(line);
 
 		List<String> words = input.words();
-		if (command != null) {
+		if (line.equals("") && methodTargets.containsKey(command) || !command.isEmpty()) {
 			MethodTarget methodTarget = methodTargets.get(command);
 			Availability availability = methodTarget.getAvailability();
 			if (availability.isAvailable()) {
@@ -212,7 +206,6 @@ public class Shell implements CommandRegistry {
 	 */
 	private boolean noInput(Input input) {
 		return input.words().isEmpty()
-				|| (input.words().size() == 1 && input.words().get(0).trim().isEmpty())
 				|| (input.words().iterator().next().matches("\\s*//.*"));
 	}
 
@@ -244,7 +237,7 @@ public class Shell implements CommandRegistry {
 		candidates.addAll(commandsStartingWith(prefix));
 
 		String best = findLongestCommand(prefix);
-		if (best != null) {
+		if (prefix.equals("") && methodTargets.containsKey(best)|| !best.isEmpty()) {
 			CompletionContext argsContext = context.drop(best.split(" ").length);
 			// Try to complete arguments
 			MethodTarget methodTarget = methodTargets.get(best);
@@ -343,7 +336,7 @@ public class Shell implements CommandRegistry {
 		String result = methodTargets.keySet().stream()
 				.filter(command -> prefix.equals(command) || prefix.startsWith(command + " "))
 				.reduce("", (c1, c2) -> c1.length() > c2.length() ? c1 : c2);
-		return "".equals(result) ? null : result;
+		return result;
 	}
 
 }
