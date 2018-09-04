@@ -160,26 +160,29 @@ public class Shell implements CommandRegistry {
 		String command = findLongestCommand(line);
 
 		List<String> words = input.words();
+		InvocationResult result = null;
 		if (methodTargetResolver.isAvailable()) {
 			MethodTarget methodTarget = methodTargetResolver.getMethodTarget(input);
 			if (methodTarget != null) {
-				Object result = invokeMethodIfAvailable(command, words, methodTarget);
-				if (result != null && !(result instanceof CommandNotCurrentlyAvailable) && !(result instanceof Exception)) {
-					return result;
+				result = invokeMethodIfAvailable(command, words, methodTarget);
+				if (result.getResult() == null || (!(result.getResult() instanceof CommandNotCurrentlyAvailable)
+						&& !(result.getResult() instanceof Exception))) {
+					return result.getResult();
 				}
 			}
 		}
 
-		if ((line.equals("") && methodTargets.containsKey(command)) || !command.isEmpty()) {
+		if (result != null && !result.isInvoked() || (line.equals("") && methodTargets.containsKey(command)) || !command.isEmpty()) {
 			MethodTarget methodTarget = methodTargets.get(command);
-			return invokeMethodIfAvailable(command, words, methodTarget);
+			InvocationResult invocationResult = invokeMethodIfAvailable(command, words, methodTarget);
+			return invocationResult.getResult();
 		}
 		else {
 			return new CommandNotFound(words);
 		}
 	}
 
-	private Object invokeMethodIfAvailable(String command, List<String> words, MethodTarget methodTarget) {
+	private InvocationResult invokeMethodIfAvailable(String command, List<String> words, MethodTarget methodTarget) {
 		Availability availability = methodTarget.getAvailability();
 		if (availability.isAvailable()) {
 			ArgumentResolver argumentResolver = methodTarget.getArgumentResolver();
@@ -192,23 +195,23 @@ public class Shell implements CommandRegistry {
 				Object[] args = resolveArgs(method, wordsForArgs);
 				validateArgs(args, methodTarget);
 
-				return ReflectionUtils.invokeMethod(method, methodTarget.getBean(), args);
+				return new InvocationResult(ReflectionUtils.invokeMethod(method, methodTarget.getBean(), args), true);
 			}
 			catch (UndeclaredThrowableException e) {
 				if (e.getCause() instanceof InterruptedException || e.getCause() instanceof ClosedByInterruptException) {
 					Thread.interrupted(); // to reset interrupted flag
 				}
-				return e.getCause();
+				return new InvocationResult(e.getCause(), false);
 			}
 			catch (Exception e) {
-				return e;
+				return new InvocationResult(e, false);
 			}
 			finally {
 				Signals.unregister("INT", sh);
 			}
 		}
 		else {
-			return new CommandNotCurrentlyAvailable(command, availability);
+			return new InvocationResult(new CommandNotCurrentlyAvailable(command, availability), false);
 		}
 	}
 
