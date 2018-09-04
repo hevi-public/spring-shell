@@ -68,4 +68,5 @@ public @interface ShellMethod {
 	 */
 	String group() default INHERITED;
 
+	boolean freetext() default false;
 }

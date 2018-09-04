@@ -63,6 +63,8 @@ public class Shell implements CommandRegistry {
 
 	@Autowired
 	protected ApplicationContext applicationContext;
+	@Autowired
+	protected MethodTargetResolver methodTargetResolver;
 
 	private Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
 
@@ -158,40 +160,53 @@ public class Shell implements CommandRegistry {
 		String command = findLongestCommand(line);
 
 		List<String> words = input.words();
-		if (line.equals("") && methodTargets.containsKey(command) || !command.isEmpty()) {
+		if (methodTargetResolver.isAvailable()) {
+			MethodTarget methodTarget = methodTargetResolver.getMethodTarget(input);
+			Object result = invokeMethodIfAvailable(command, words, methodTarget);
+			if (!(result instanceof CommandNotCurrentlyAvailable) && !(result instanceof Exception)) {
+				return result;
+			}
+		}
+
+		if ((line.equals("") && methodTargets.containsKey(command)) || !command.isEmpty()) {
 			MethodTarget methodTarget = methodTargets.get(command);
-			Availability availability = methodTarget.getAvailability();
-			if (availability.isAvailable()) {
-				List<String> wordsForArgs = wordsForArguments(command, words);
-				Method method = methodTarget.getMethod();
-
-				Thread commandThread = Thread.currentThread();
-				Object sh = Signals.register("INT", () -> commandThread.interrupt());
-				try {
-					Object[] args = resolveArgs(method, wordsForArgs);
-					validateArgs(args, methodTarget);
-
-					return ReflectionUtils.invokeMethod(method, methodTarget.getBean(), args);
-				}
-				catch (UndeclaredThrowableException e) {
-					if (e.getCause() instanceof InterruptedException || e.getCause() instanceof ClosedByInterruptException) {
-						Thread.interrupted(); // to reset interrupted flag
-					}
-					return e.getCause();
-				}
-				catch (Exception e) {
-					return e;
-				}
-				finally {
-					Signals.unregister("INT", sh);
-				}
-			}
-			else {
-				return new CommandNotCurrentlyAvailable(command, availability);
-			}
+			return invokeMethodIfAvailable(command, words, methodTarget);
 		}
 		else {
 			return new CommandNotFound(words);
+		}
+	}
+
+	private Object invokeMethodIfAvailable(String command, List<String> words, MethodTarget methodTarget) {
+		Availability availability = methodTarget.getAvailability();
+		if (availability.isAvailable()) {
+			ArgumentResolver argumentResolver = methodTarget.getArgumentResolver();
+			List<String> wordsForArgs = argumentResolver.wordsForArguments(command, words);
+			Method method = methodTarget.getMethod();
+
+			Thread commandThread = Thread.currentThread();
+			Object sh = Signals.register("INT", () -> commandThread.interrupt());
+			try {
+				Object[] args = resolveArgs(method, wordsForArgs);
+				validateArgs(args, methodTarget);
+
+				return ReflectionUtils.invokeMethod(method, methodTarget.getBean(), args);
+			}
+			catch (UndeclaredThrowableException e) {
+				if (e.getCause() instanceof InterruptedException || e.getCause() instanceof ClosedByInterruptException) {
+					Thread.interrupted(); // to reset interrupted flag
+				}
+				return e.getCause();
+			}
+			catch (Exception e) {
+				return e;
+			}
+			finally {
+				Signals.unregister("INT", sh);
+			}
+		}
+		else {
+			return new CommandNotCurrentlyAvailable(command, availability);
 		}
 	}
 
@@ -207,21 +222,6 @@ public class Shell implements CommandRegistry {
 	private boolean noInput(Input input) {
 		return input.words().isEmpty()
 				|| (input.words().iterator().next().matches("\\s*//.*"));
-	}
-
-	/**
-	 * Returns the list of words to be considered for argument resolving. Drops the first N
-	 * words used for the command, as well as an optional empty word at the end of the list
-	 * (which may be present if user added spaces before submitting the buffer)
-	 */
-	private List<String> wordsForArguments(String command, List<String> words) {
-		int wordsUsedForCommandKey = command.split(" ").length;
-		List<String> args = words.subList(wordsUsedForCommandKey, words.size());
-		int last = args.size() - 1;
-		if (last >= 0 && "".equals(args.get(last))) {
-			args.remove(last);
-		}
-		return args;
 	}
 
 	/**

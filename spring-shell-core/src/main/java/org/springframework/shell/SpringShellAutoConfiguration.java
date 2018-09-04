@@ -72,4 +72,15 @@ public class SpringShellAutoConfiguration {
 		return new Shell(resultHandler);
 	}
 
+	@Bean
+	public MethodTargetResolver methodTargetResolver() {
+		return new DefaultMethodTargetResolver();
+	}
+
+	@Bean
+	public ArgumentResolver argumentResolver() {
+		return new DefaultArgumentResolver();
+	}
+
+
 }

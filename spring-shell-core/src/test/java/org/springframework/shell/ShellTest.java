@@ -62,6 +62,9 @@ public class ShellTest {
 
 	@Mock
 	private ParameterResolver parameterResolver;
+
+	@Mock
+	private MethodTargetResolver methodTargetResolver;
 	
 	private ValueResult valueResult;
 
@@ -73,6 +76,7 @@ public class ShellTest {
 	@Before
 	public void setUp() {
 		shell.parameterResolvers = Arrays.asList(parameterResolver);
+		shell.methodTargetResolver = methodTargetResolver;
 	}
 
 	@Test
@@ -100,6 +104,7 @@ public class ShellTest {
 	public void commandNotFound() throws IOException {
 		when(inputProvider.readInput()).thenReturn(() -> "hello world how are you doing ?", null);
 		doThrow(new Exit()).when(resultHandler).handleResult(isA(CommandNotFound.class));
+		when(methodTargetResolver.isAvailable()).thenReturn(false);
 
 		shell.methodTargets = Collections.singletonMap("bonjour", MethodTarget.of("helloWorld", this, new Command.Help("Say hello")));
 
@@ -117,6 +122,7 @@ public class ShellTest {
 	public void commandNotFoundPrefix() throws IOException {
 		when(inputProvider.readInput()).thenReturn(() -> "helloworld how are you doing ?", null);
 		doThrow(new Exit()).when(resultHandler).handleResult(isA(CommandNotFound.class));
+		when(methodTargetResolver.isAvailable()).thenReturn(false);
 
 		shell.methodTargets = Collections.singletonMap("hello", MethodTarget.of("helloWorld", this, new Command.Help("Say hello")));
 

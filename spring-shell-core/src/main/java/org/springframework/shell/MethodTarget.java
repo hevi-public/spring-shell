@@ -37,20 +37,30 @@ public class MethodTarget implements Command {
 
 	private final Help help;
 
+	private ArgumentResolver argumentResolver;
+
 	/**
 	 * If not null, returns whether or not the command is currently available. Implementations must be idempotent.
 	 */
 	private final Supplier<Availability> availabilityIndicator;
 
 	public MethodTarget(Method method, Object bean, String help) {
-		this(method, bean, new Help(help, null), null);
+		this(method, bean, new Help(help, null), null, null);
 	}
 
 	public MethodTarget(Method method, Object bean, String help, Supplier<Availability> availabilityIndicator) {
-		this(method, bean, new Help(help, null), availabilityIndicator);
+		this(method, bean, new Help(help, null), availabilityIndicator, null);
 	}
 
 	public MethodTarget(Method method, Object bean, Help help, Supplier<Availability> availabilityIndicator) {
+		this(method, bean, help, availabilityIndicator, null);
+	}
+
+	public MethodTarget(Method method, Object bean, String help, ArgumentResolver argumentResolver) {
+		this(method, bean, new Help(help, null), null, argumentResolver);
+	}
+
+	public MethodTarget(Method method, Object bean, Help help, Supplier<Availability> availabilityIndicator, ArgumentResolver argumentResolver) {
 		Assert.notNull(method, "Method cannot be null");
 		Assert.notNull(bean, "Bean cannot be null");
 		Assert.hasText(help.getDescription(), String.format("Help cannot be blank when trying to define command based on '%s'", method));
@@ -59,6 +69,7 @@ public class MethodTarget implements Command {
 		this.bean = bean;
 		this.help = help;
 		this.availabilityIndicator = availabilityIndicator != null ? availabilityIndicator : () -> Availability.available();
+		this.argumentResolver = argumentResolver;
 	}
 
 	/**
@@ -78,9 +89,24 @@ public class MethodTarget implements Command {
 		ReflectionUtils.doWithMethods(bean.getClass(), found::add, m -> m.getName().equals(name));
 		if (found.size() != 1) {
 			throw new IllegalArgumentException(String.format("Could not find unique method named '%s' on object of class %s. Found %s",
-				name, bean.getClass(), found));
+					name, bean.getClass(), found));
 		}
-		return new MethodTarget(found.iterator().next(), bean, help, availabilityIndicator);
+		return new MethodTarget(found.iterator().next(), bean, help, availabilityIndicator, null);
+	}
+
+	/**
+	 * Construct a MethodTarget for the unique method named {@literal name} on the given object. Fails with an exception
+	 * in case of overloaded method.
+	 */
+	public static MethodTarget of(String name, Object bean, Help help, Supplier<Availability> availabilityIndicator,
+								  ArgumentResolver argumentResolver) {
+		Set<Method> found = new HashSet<>();
+		ReflectionUtils.doWithMethods(bean.getClass(), found::add, m -> m.getName().equals(name));
+		if (found.size() != 1) {
+			throw new IllegalArgumentException(String.format("Could not find unique method named '%s' on object of class %s. Found %s",
+					name, bean.getClass(), found));
+		}
+		return new MethodTarget(found.iterator().next(), bean, help, availabilityIndicator, argumentResolver);
 	}
 
 	public Method getMethod() {
@@ -97,6 +123,14 @@ public class MethodTarget implements Command {
 
 	public String getGroup() {
 		return help.getGroup();
+	}
+
+	public ArgumentResolver getArgumentResolver() {
+		if (this.argumentResolver != null) {
+			return this.argumentResolver;
+		} else {
+			return new DefaultArgumentResolver();
+		}
 	}
 
 	public Availability getAvailability() {

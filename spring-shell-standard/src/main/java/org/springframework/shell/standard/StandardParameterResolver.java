@@ -130,97 +130,108 @@ public class StandardParameterResolver implements ParameterResolver {
 	@Override
 	public ValueResult resolve(MethodParameter methodParameter, List<String> wordsBuffer) {
 		String prefix = prefixForMethod(methodParameter.getMethod());
+		boolean freetext = methodParameter.getMethod().getAnnotation(ShellMethod.class).freetext();
 
 		List<String> words = wordsBuffer.stream().filter(w -> !w.isEmpty()).collect(Collectors.toList());
 
 		CacheKey cacheKey = new CacheKey(methodParameter.getMethod(), wordsBuffer);
 		parameterCache.clear();
-		Map<Parameter, ParameterRawValue> resolved = parameterCache.computeIfAbsent(cacheKey, (k) -> {
+		Map<Parameter, ParameterRawValue> resolved = new HashMap<>();
 
-			Map<Parameter, ParameterRawValue> result = new HashMap<>();
-			Map<String, String> namedParameters = new HashMap<>();
+		if (!freetext) {
+			resolved = parameterCache.computeIfAbsent(cacheKey, (k) -> {
 
-			// index of words that haven't yet been used to resolve parameter values
-			List<Integer> unusedWords = new ArrayList<>();
+				Map<Parameter, ParameterRawValue> result = new HashMap<>();
+				Map<String, String> namedParameters = new HashMap<>();
 
-			Set<String> possibleKeys = gatherAllPossibleKeys(methodParameter.getMethod());
+				// index of words that haven't yet been used to resolve parameter values
+				List<Integer> unusedWords = new ArrayList<>();
 
-			// First, resolve all parameters passed by-name
-			for (int i = 0; i < words.size(); i++) {
-				int from = i;
-				String word = words.get(i);
-				if (possibleKeys.contains(word)) {
-					String key = word;
-					Parameter parameter = lookupParameterForKey(methodParameter.getMethod(), key);
-					int arity = getArity(parameter);
+				Set<String> possibleKeys = gatherAllPossibleKeys(methodParameter.getMethod());
 
-					if (i + 1 + arity > words.size()) {
-						String input = words.subList(i, words.size()).stream().collect(Collectors.joining(" "));
-						throw new UnfinishedParameterResolutionException(
-								describe(Utils.createMethodParameter(parameter)).findFirst().get(), input);
-					}
-					Assert.isTrue(i + 1 + arity <= words.size(),
-							String.format("Not enough input for parameter '%s'", word));
-					String raw = words.subList(i + 1, i + 1 + arity).stream().collect(Collectors.joining(","));
-					Assert.isTrue(!namedParameters.containsKey(key),
-							String.format("Parameter for '%s' has already been specified", word));
-					namedParameters.put(key, raw);
-					if (arity == 0) {
-						boolean defaultValue = booleanDefaultValue(parameter);
-						// Boolean parameter has been specified. Use the opposite of the default value
-						result.put(parameter,
-								ParameterRawValue.explicit(String.valueOf(!defaultValue), key, from, from));
-					}
+				// First, resolve all parameters passed by-name
+				for (int i = 0; i < words.size(); i++) {
+					int from = i;
+					String word = words.get(i);
+					if (possibleKeys.contains(word)) {
+						String key = word;
+						Parameter parameter = lookupParameterForKey(methodParameter.getMethod(), key);
+						int arity = getArity(parameter);
+
+						if (i + 1 + arity > words.size()) {
+							String input = words.subList(i, words.size()).stream().collect(Collectors.joining(" "));
+							throw new UnfinishedParameterResolutionException(
+									describe(Utils.createMethodParameter(parameter)).findFirst().get(), input);
+						}
+						Assert.isTrue(i + 1 + arity <= words.size(),
+								String.format("Not enough input for parameter '%s'", word));
+						String raw = words.subList(i + 1, i + 1 + arity).stream().collect(Collectors.joining(","));
+						Assert.isTrue(!namedParameters.containsKey(key),
+								String.format("Parameter for '%s' has already been specified", word));
+						namedParameters.put(key, raw);
+						if (arity == 0) {
+							boolean defaultValue = booleanDefaultValue(parameter);
+							// Boolean parameter has been specified. Use the opposite of the default value
+							result.put(parameter,
+									ParameterRawValue.explicit(String.valueOf(!defaultValue), key, from, from));
+						} else {
+							i += arity;
+							result.put(parameter, ParameterRawValue.explicit(raw, key, from, i));
+						}
+					} // store for later processing of positional params
 					else {
-						i += arity;
-						result.put(parameter, ParameterRawValue.explicit(raw, key, from, i));
+						unusedWords.add(i);
 					}
-				} // store for later processing of positional params
-				else {
-					unusedWords.add(i);
 				}
-			}
 
-			// Now have a second pass over params and treat them as positional
-			int offset = 0;
+				// Now have a second pass over params and treat them as positional
+				int offset = 0;
+				Parameter[] parameters = methodParameter.getMethod().getParameters();
+				for (int i = 0, parametersLength = parameters.length; i < parametersLength; i++) {
+					Parameter parameter = parameters[i];
+					// Compute the intersection between possible keys for the param and what we've already
+					// seen for named params
+					Collection<String> keys = getKeysForParameter(methodParameter.getMethod(), i)
+							.collect(Collectors.toSet());
+					Collection<String> copy = new HashSet<>(keys);
+					copy.retainAll(namedParameters.keySet());
+					if (copy.isEmpty()) { // Was not set via a key (including aliases), must be positional
+						int arity = getArity(parameter);
+						if (arity > 0 && (offset + arity) <= unusedWords.size()) {
+							String raw = unusedWords.subList(offset, offset + arity).stream()
+									.map(index -> words.get(index))
+									.collect(Collectors.joining(","));
+							int from = unusedWords.get(offset);
+							int to = from + arity - 1;
+							result.put(parameter, ParameterRawValue.explicit(raw, null, from, to));
+							offset += arity;
+						} // No more input. Try defaultValues
+						else {
+							Optional<String> defaultValue = defaultValueFor(parameter);
+							defaultValue.ifPresent(
+									value -> result.put(parameter, ParameterRawValue.implicit(value, null, null, null)));
+						}
+					} else if (copy.size() > 1) {
+						throw new IllegalArgumentException(
+								"Named parameter has been specified multiple times via " + quote(copy));
+					}
+				}
+
+				Assert.isTrue(offset == unusedWords.size(),
+						"Too many arguments: the following could not be mapped to parameters: "
+								+ unusedWords.subList(offset, unusedWords.size()).stream()
+								.map(index -> words.get(index)).collect(Collectors.joining(" ", "'", "'")));
+				return result;
+			});
+		} else {
 			Parameter[] parameters = methodParameter.getMethod().getParameters();
-			for (int i = 0, parametersLength = parameters.length; i < parametersLength; i++) {
-				Parameter parameter = parameters[i];
-				// Compute the intersection between possible keys for the param and what we've already
-				// seen for named params
-				Collection<String> keys = getKeysForParameter(methodParameter.getMethod(), i)
-						.collect(Collectors.toSet());
-				Collection<String> copy = new HashSet<>(keys);
-				copy.retainAll(namedParameters.keySet());
-				if (copy.isEmpty()) { // Was not set via a key (including aliases), must be positional
-					int arity = getArity(parameter);
-					if (arity > 0 && (offset + arity) <= unusedWords.size()) {
-						String raw = unusedWords.subList(offset, offset + arity).stream()
-								.map(index -> words.get(index))
-								.collect(Collectors.joining(","));
-						int from = unusedWords.get(offset);
-						int to = from + arity - 1;
-						result.put(parameter, ParameterRawValue.explicit(raw, null, from, to));
-						offset += arity;
-					} // No more input. Try defaultValues
-					else {
-						Optional<String> defaultValue = defaultValueFor(parameter);
-						defaultValue.ifPresent(
-								value -> result.put(parameter, ParameterRawValue.implicit(value, null, null, null)));
-					}
-				}
-				else if (copy.size() > 1) {
-					throw new IllegalArgumentException(
-							"Named parameter has been specified multiple times via " + quote(copy));
-				}
-			}
+			Parameter parameter = parameters[0];
 
-			Assert.isTrue(offset == unusedWords.size(),
-					"Too many arguments: the following could not be mapped to parameters: "
-							+ unusedWords.subList(offset, unusedWords.size()).stream()
-									.map(index -> words.get(index)).collect(Collectors.joining(" ", "'", "'")));
-			return result;
-		});
+			Collection<String> keys = getKeysForParameter(methodParameter.getMethod(), 0)
+					.collect(Collectors.toSet());
+
+			resolved.put(parameter, ParameterRawValue.implicit(cacheKey.words.stream().collect(Collectors.joining(" ")), null, null, null));
+		}
 
 		Parameter param = methodParameter.getMethod().getParameters()[methodParameter.getParameterIndex()];
 		if (!resolved.containsKey(param)) {
