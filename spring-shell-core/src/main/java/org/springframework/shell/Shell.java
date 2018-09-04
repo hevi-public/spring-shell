@@ -162,9 +162,11 @@ public class Shell implements CommandRegistry {
 		List<String> words = input.words();
 		if (methodTargetResolver.isAvailable()) {
 			MethodTarget methodTarget = methodTargetResolver.getMethodTarget(input);
-			Object result = invokeMethodIfAvailable(command, words, methodTarget);
-			if (!(result instanceof CommandNotCurrentlyAvailable) && !(result instanceof Exception)) {
-				return result;
+			if (methodTarget != null) {
+				Object result = invokeMethodIfAvailable(command, words, methodTarget);
+				if (result != null && !(result instanceof CommandNotCurrentlyAvailable) && !(result instanceof Exception)) {
+					return result;
+				}
 			}
 		}
 

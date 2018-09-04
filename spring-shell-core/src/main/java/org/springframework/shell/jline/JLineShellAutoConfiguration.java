@@ -176,6 +176,7 @@ public class JLineShellAutoConfiguration {
 
 		LineReader lineReader = lineReaderBuilder.build();
 		lineReader.unsetOpt(LineReader.Option.INSERT_TAB); // This allows completion on an empty buffer, rather than inserting a tab
+		lineReader.setOpt(LineReader.Option.ERASE_LINE_ON_FINISH);
 		return lineReader;
 	}
 
